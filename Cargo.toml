@@ -1,0 +1,11 @@
+[package]
+name = "kadem"
+version = "0.1.0"
+authors = ["Paul Collier <paul@paulcollier.ca>"]
+
+[dependencies]
+mio = "0.5"
+rand = "0.3"
+
+[dependencies.bencode]
+git = "https://github.com/arjantop/rust-bencode.git"
