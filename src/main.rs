@@ -34,31 +34,37 @@ impl ToBencode for NodeId {
     }
 }
 
-/// Short quasi-unique IDs for correlating queries to responses.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RequestId(u32);
+/// Correlates queries to responses.
+///
+/// (Should use an optimized SmallVec rather than rolling our own...)
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TxId {
+    Short([u8; 2]),
+    Arbitrary(Bytes),
+}
 
-/// RequestIds are serialized as `[a-z]{2}` for now.
-const MAX_REQUEST_ID: u32 = 26 * 26;
-
-impl RequestId {
+impl TxId {
     fn random() -> Self {
-        // ought to use rand::distributions::Range...
-        RequestId(rand::random::<u32>() % MAX_REQUEST_ID)
+        fn alpha() -> u8 {
+            let n = rand::random::<u8>() % 52;
+            let c = if n >= 26 { n - 26 + 97 } else { n + 65 };
+            debug_assert!(match c as char { 'A'...'Z' | 'a'...'z' => true, _ => false });
+            c
+        }
+        TxId::Short([alpha(), alpha()])
     }
 
-    fn as_vec(&self) -> Vec<u8> {
-        assert!(self.0 < MAX_REQUEST_ID);
-        const LIMIT: u32 = 26;
-        debug_assert_eq!(MAX_REQUEST_ID, LIMIT * LIMIT);
-        let (hi, lo) = (self.0 / LIMIT, self.0 % LIMIT);
-        vec![hi as u8 + 97, lo as u8 + 97]
+    fn as_slice(&self) -> &[u8] {
+        match *self {
+            TxId::Short(ref two) => two,
+            TxId::Arbitrary(ref bytes) => bytes.as_slice(),
+        }
     }
 }
 
-impl ToBencode for RequestId {
+impl ToBencode for TxId {
     fn to_bencode(&self) -> Bencode {
-        ByteString(self.as_vec())
+        ByteString(self.as_slice().to_vec())
     }
 }
 
@@ -70,8 +76,8 @@ enum Query {
 #[derive(Debug)]
 struct FullQuery {
     query: Query,
-    request_id: RequestId,
     sender_id: NodeId,
+    tx_id: TxId,
 }
 
 impl ToBencode for FullQuery {
@@ -88,7 +94,7 @@ impl ToBencode for FullQuery {
         let mut dict = BTreeMap::new();
         dict.insert(Bytes::from_str("y"), 'q'.to_bencode());
         dict.insert(Bytes::from_str("q"), ByteString(query_type.to_vec()));
-        dict.insert(Bytes::from_str("t"), self.request_id.to_bencode());
+        dict.insert(Bytes::from_str("t"), self.tx_id.to_bencode());
         dict.insert(Bytes::from_str("a"), Dict(args));
         Dict(dict)
     }
@@ -129,11 +135,11 @@ impl Handler for ServerHandler {
 
 impl ServerHandler {
     fn send(&self, event_loop: &mut EventLoop<ServerHandler>, dest: &SocketAddr, query: Query) -> io::Result<()> {
-        let request_id = RequestId::random();
+        let tx_id = TxId::random();
         let full = FullQuery {
             query: query,
-            request_id: request_id,
             sender_id: self.id,
+            tx_id: tx_id,
         };
         let bytes = full.to_bencode().to_bytes()?;
 
