@@ -2,6 +2,7 @@ use std::{self, io};
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
+use std::hash::{Hash, Hasher};
 use std::net::{Ipv4Addr, SocketAddrV4};
 
 use bencode::{Bencode, DictMap, FromBencode, ListVec, ToBencode};
@@ -103,6 +104,12 @@ impl FromBencode for TxId {
         } else {
             Ok(TxId::Arbitrary(Bytes::from_slice(bytes)))
         }
+    }
+}
+
+impl Hash for TxId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Hash::hash_slice(self.as_slice(), state)
     }
 }
 
