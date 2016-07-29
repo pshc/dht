@@ -1,7 +1,7 @@
 use std::{self, io};
 use std::collections::BTreeMap;
 use std::error::Error;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Debug, Display, Formatter};
 
 use bencode::{Bencode, DictMap, FromBencode, ListVec, ToBencode};
 use bencode::Bencode::{ByteString, Dict, List, Number};
@@ -11,12 +11,22 @@ use rand;
 // ! Primitives
 
 /// The 160-bit space of BitTorrent infohashes.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
 pub struct NodeId([u8; 20]);
 
 impl NodeId {
     pub fn random() -> Self {
         NodeId(rand::random())
+    }
+}
+
+impl Debug for NodeId {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Node(")?;
+        for b in &self.0 {
+            write!(f, "{:02x}", b)?;
+        }
+        write!(f, ")")
     }
 }
 
@@ -43,7 +53,7 @@ impl ToBencode for NodeId {
 /// Correlates queries to responses.
 ///
 /// (Should use an optimized SmallVec rather than rolling our own...)
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq)]
 pub enum TxId {
     Short([u8; 2]),
     Arbitrary(Bytes),
@@ -68,6 +78,16 @@ impl TxId {
     }
 }
 
+impl Debug for TxId {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Tx(")?;
+        for b in self.as_slice() {
+            write!(f, "{:02x}", b)?;
+        }
+        write!(f, ")")
+    }
+}
+
 impl FromBencode for TxId {
     type Err = DecodeError;
     fn from_bencode(b: &Bencode) -> DecodeResult<Self> {
@@ -77,6 +97,12 @@ impl FromBencode for TxId {
         } else {
             Ok(TxId::Arbitrary(Bytes::from_slice(bytes)))
         }
+    }
+}
+
+impl PartialEq for TxId {
+    fn eq(&self, other: &TxId) -> bool {
+        self.as_slice() == other.as_slice()
     }
 }
 
