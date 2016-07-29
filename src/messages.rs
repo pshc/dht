@@ -12,11 +12,23 @@ use rand;
 
 /// The 160-bit space of BitTorrent infohashes.
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
-pub struct NodeId([u8; 20]);
+pub struct NodeId([u8; NODE_ID_LEN]);
+
+const NODE_ID_LEN: usize = 20;
 
 impl NodeId {
     pub fn random() -> Self {
         NodeId(rand::random())
+    }
+
+    pub fn from_slice(bytes: &[u8]) -> DecodeResult<Self> {
+        if bytes.len() == NODE_ID_LEN {
+            let mut fixed: [u8; NODE_ID_LEN] = [0; NODE_ID_LEN];
+            fixed.copy_from_slice(bytes);
+            Ok(NodeId(fixed))
+        } else {
+            Err(DecodeError::WrongLength)
+        }
     }
 }
 
@@ -33,14 +45,7 @@ impl Debug for NodeId {
 impl FromBencode for NodeId {
     type Err = DecodeError;
     fn from_bencode(b: &Bencode) -> DecodeResult<Self> {
-        let bytes = b.bytes()?;
-        if bytes.len() == 20 {
-            let mut fixed: [u8; 20] = [0; 20];
-            fixed.copy_from_slice(bytes);
-            Ok(NodeId(fixed))
-        } else {
-            Err(DecodeError::WrongLength)
-        }
+        NodeId::from_slice(b.bytes()?)
     }
 }
 
