@@ -1,4 +1,4 @@
-#![feature(question_mark)]
+#![feature(ip, question_mark)]
 
 extern crate bencode;
 extern crate mio;
@@ -86,9 +86,29 @@ impl ServerHandler {
         }
     }
 
-    fn received(&self, _: &mut EventLoop<ServerHandler>, addr: &SocketAddr, msg: &Bencode) -> io::Result<()> {
-        let resp = DhtMessage::from_bencode(msg)?;
-        println!("{:?}: valid {:?})", addr, resp);
+    fn received(&self, event_loop: &mut EventLoop<ServerHandler>, addr: &SocketAddr, msg: &Bencode)
+        -> io::Result<()>
+    {
+        match DhtMessage::from_bencode(msg)? {
+            DhtMessage::Query(query) => {
+                println!("query from {:?}: {:?}", addr, query);
+            }
+            DhtMessage::Response(resp) => match resp.response {
+                Response::Pong => {
+                    println!("pong {:?} => {:?}", resp.tx_id, resp.sender_id);
+
+                    let target = NodeId::random();
+                    println!("ask for {:?}", target);
+                    self.send(event_loop, addr, Query::FindNode(target))?;
+                }
+                Response::FoundNodes {nodes4} => {
+                    println!("found nodes {:?}", nodes4);
+                }
+            },
+            DhtMessage::Error(e) => {
+                println!("error from {:?}: {:?}", addr, e);
+            }
+        }
         Ok(())
     }
 }
