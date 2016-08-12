@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use bencode::{Bencode, DictMap, FromBencode, ListVec, ToBencode};
 use bencode::Bencode::{ByteString, Dict, List, Number};
@@ -14,9 +14,9 @@ use rand;
 
 /// The 160-bit space of BitTorrent infohashes.
 #[derive(Clone, Copy, Eq, Ord, PartialEq, PartialOrd)]
-pub struct NodeId([u8; NODE_ID_LEN]);
+pub struct NodeId(pub [u8; NODE_ID_LEN]);
 
-const NODE_ID_LEN: usize = 20;
+pub const NODE_ID_LEN: usize = 20;
 
 impl NodeId {
     pub fn random() -> Self {
@@ -31,6 +31,12 @@ impl NodeId {
         } else {
             Err(DecodeError::WrongLength)
         }
+    }
+
+    pub fn bit(&self, index: usize) -> bool {
+        debug_assert!(index < NODE_ID_LEN * 8);
+        let mask = 1 << (7 - (index % 8));
+        (self.0[index / 8] & mask) != 0
     }
 }
 
@@ -254,13 +260,18 @@ impl Peer4Info {
         }
         Ok(Peer4Info(SocketAddrV4::new(ip, port)))
     }
+
+    pub fn socket_addr(&self) -> SocketAddr {
+        SocketAddr::V4(self.0)
+    }
+
 }
 
 /// Contact info for one IPv4 node.
 #[derive(Clone, Copy, Debug)]
 pub struct Node4Info {
-    id: NodeId,
-    peer: Peer4Info,
+    pub id: NodeId,
+    pub peer: Peer4Info,
 }
 
 const NODE4_LEN: usize = NODE_ID_LEN + 6;

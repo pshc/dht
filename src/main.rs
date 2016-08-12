@@ -13,8 +13,10 @@ use mio::{EventLoop, EventSet, Handler, PollOpt, Timeout, Token};
 use mio::udp::UdpSocket;
 
 use messages::*;
+use table::{NodeState, Slot, Table};
 
 mod messages;
+mod table;
 
 fn main() {
     serve().unwrap()
@@ -24,7 +26,7 @@ const SERVER: Token = Token(0);
 
 struct ServerHandler {
     sock: UdpSocket,
-    id: NodeId,
+    table: Table,
     txs: HashMap<TxId, Tx>,
 }
 
@@ -87,7 +89,7 @@ impl ServerHandler {
 
         let full = FullQuery {
             query: query,
-            sender_id: self.id,
+            sender_id: self.table.our_id().clone(),
             tx_id: tx_id.clone(),
         };
         println!("send to {:?}: {:?}", dest, full);
@@ -98,7 +100,7 @@ impl ServerHandler {
         if let Some(n_sent) = self.sock.send_to(&bytes, dest)? {
             assert_eq!(n_sent, bytes.len());
 
-            let timeout = event_loop.timeout_ms(tx_id.clone(), 1000).unwrap();
+            let timeout = event_loop.timeout_ms(tx_id.clone(), 5000).unwrap();
             let tx = Tx::FirstPing(dest.clone(), timeout);
             let overwritten = self.txs.insert(tx_id, tx);
             debug_assert!(overwritten.is_none());
@@ -136,6 +138,7 @@ impl ServerHandler {
     fn handle(&mut self, event_loop: &mut EventLoop<ServerHandler>, addr: &SocketAddr,
               resp: FullResponse, tx: Tx) -> io::Result<()>
     {
+        let ref sender = resp.sender_id;
         match resp.response {
             Response::Pong => {
                 println!("pong from {:?}", resp.sender_id);
@@ -146,6 +149,28 @@ impl ServerHandler {
                             return Err(io::Error::new(io::ErrorKind::InvalidData, "wrong addr"))
                         }
                         event_loop.clear_timeout(timeout);
+
+                        // okay, we got the first-ping back from our peer.
+                        // try to add them to our routing table.
+                        if let Some(slot) = self.table.allocate(sender) {
+                            match *slot {
+                                Slot::Empty => {
+                                    *slot = Slot::Node(sender.clone(), NodeState::Good);
+                                    // set timeout here...
+                                }
+                                Slot::Node(_, ref mut state@NodeState::Pinging) => {
+                                    // XXX there's no way to *get* to here from a FirstPing!
+                                    //     or is there??? could be a collision...
+                                    *state = NodeState::Good;
+                                }
+                                Slot::Node(_, NodeState::Good) => {
+                                    // refresh timeout?
+                                    println!("first-pong: {:?} already Good", sender)
+                                }
+                            }
+                        } else {
+                            println!("first-pong from now-evicted {:?}", sender);
+                        }
                     }
                 }
 
@@ -154,7 +179,23 @@ impl ServerHandler {
                 self.send(event_loop, addr, Query::FindNode(target))
             }
             Response::FoundNodes {nodes4} => {
-                println!("found nodes {:?}", nodes4);
+                println!("found {} nodes...", nodes4.len());
+                for found_node in nodes4 {
+                    let ping: bool;
+                    if let Some(slot) = self.table.allocate(&found_node.id) {
+                        ping = slot.is_empty();
+                        if ping {
+                            println!("{:?} is new, will ping", found_node.id);
+                            *slot = Slot::Node(found_node.id, NodeState::Pinging);
+                        }
+                    } else {
+                        // no space for it, so just drop it
+                        ping = false;
+                    }
+                    if ping {
+                        self.send(event_loop, &found_node.peer.socket_addr(), Query::Ping)?
+                    }
+                }
                 Ok(())
             }
         }
@@ -174,9 +215,10 @@ fn serve() -> io::Result<()> {
 
     let ref bootstrap_addr = "212.129.33.50:6881".parse().unwrap(); // dht.transmissionbt.com
 
+    let my_id = NodeId::random();
     let ref mut handler = ServerHandler {
         sock: sock,
-        id: NodeId::random(),
+        table: Table::new(my_id),
         txs: HashMap::new(),
     };
     handler.send(event_loop, bootstrap_addr, Query::Ping)?;
